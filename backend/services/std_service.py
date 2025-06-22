@@ -50,7 +50,10 @@ class StdService:
         self.embedding_func = EmbeddingFactory.create_embedding_function(config)
         
         # 连接 Milvus
-        self.client = MilvusClient(db_path)
+        milvus_host = "127.0.0.1"
+        milvus_port = 19530
+        self.client = MilvusClient(uri=f"http://{milvus_host}:{milvus_port}")
+        # self.client = MilvusClient(db_path)
         self.collection_name = collection_name
         self.client.load_collection(self.collection_name)
 

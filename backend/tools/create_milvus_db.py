@@ -1,12 +1,11 @@
 from pymilvus import model
-from pymilvus import MilvusClient
 import pandas as pd
 from tqdm import tqdm
 import logging
 from dotenv import load_dotenv
 load_dotenv()
 import torch    
-from pymilvus import MilvusClient, DataType, FieldSchema, CollectionSchema
+from pymilvus import MilvusClient, DataType, FieldSchema, CollectionSchema, connections
 
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -27,10 +26,13 @@ embedding_function = model.dense.SentenceTransformerEmbeddingFunction(
 
 # 文件路径
 file_path = "backend/data/SNOMED_5000.csv"
-db_path = "backend/db/snomed_bge_m3.db"
+# db_path = "backend/db/snomed_bge_m3.db"
+milvus_host = "127.0.0.1"
+milvus_port = 19530
 
 # 连接到 Milvus
-client = MilvusClient(db_path)
+client = MilvusClient(uri=f"http://{milvus_host}:{milvus_port}")
+# connections.connect(host=milvus_host, port=milvus_port)
 
 collection_name = "concepts_only_name"
 # collection_name = "concepts_with_synonym"
@@ -52,11 +54,11 @@ fields = [
     FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
     FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=vector_dim), # BGE-m3 最重要
     FieldSchema(name="concept_id", dtype=DataType.VARCHAR, max_length=50),
-    FieldSchema(name="concept_name", dtype=DataType.VARCHAR, max_length=200),
+    FieldSchema(name="concept_name", dtype=DataType.VARCHAR, max_length=300),
     FieldSchema(name="domain_id", dtype=DataType.VARCHAR, max_length=20),
     FieldSchema(name="vocabulary_id", dtype=DataType.VARCHAR, max_length=20),
     FieldSchema(name="concept_class_id", dtype=DataType.VARCHAR, max_length=20),
-    FieldSchema(name="standard_concept", dtype=DataType.VARCHAR, max_length=1),
+    FieldSchema(name="standard_concept", dtype=DataType.VARCHAR, max_length=10),
     FieldSchema(name="concept_code", dtype=DataType.VARCHAR, max_length=50),
     FieldSchema(name="valid_start_date", dtype=DataType.VARCHAR, max_length=10),
     FieldSchema(name="valid_end_date", dtype=DataType.VARCHAR, max_length=10),
@@ -83,8 +85,7 @@ index_params = client.prepare_index_params()
 index_params.add_index(
     field_name="vector",  # 指定要为哪个字段创建索引，这里是向量字段
     index_type="AUTOINDEX",  # 使用自动索引类型，Milvus会根据数据特性选择最佳索引
-    metric_type="COSINE",  # 使用余弦相似度作为向量相似度度量方式
-    params={"nlist": 1024}  # 索引参数：nlist表示聚类中心的数量，值越大检索精度越高但速度越慢
+    metric_type="COSINE"  # 使用余弦相似度作为向量相似度度量方式
 )
 
 client.create_index(
