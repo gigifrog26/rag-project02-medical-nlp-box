@@ -13,24 +13,11 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 class StdService:
-    """
-    医学术语标准化服务
-    使用向量数据库进行医学术语的标准化和相似度搜索
-    """
+
     def __init__(self, 
                  provider="huggingface",
                  model="BAAI/bge-m3",
-                 db_path="db/snomed_bge_m3.db",
-                 collection_name="concepts_only_name"):
-        """
-        初始化标准化服务
-        
-        Args:
-            provider: 嵌入模型提供商 (openai/bedrock/huggingface)
-            model: 使用的模型名称
-            db_path: Milvus 数据库路径
-            collection_name: 集合名称
-        """
+                 collection_name="fin_term"):
         # 根据 provider 字符串匹配正确的枚举值
         provider_mapping = {
             'openai': EmbeddingProvider.OPENAI,
@@ -53,13 +40,12 @@ class StdService:
         milvus_host = "127.0.0.1"
         milvus_port = 19530
         self.client = MilvusClient(uri=f"http://{milvus_host}:{milvus_port}")
-        # self.client = MilvusClient(db_path)
         self.collection_name = collection_name
         self.client.load_collection(self.collection_name)
 
     def search_similar_terms(self, query: str, limit: int = 5) -> List[Dict]:
         """
-        搜索与查询文本相似的医学术语
+        搜索与查询文本相似的金融术语
         
         Args:
             query: 查询文本
@@ -67,14 +53,8 @@ class StdService:
             
         Returns:
             包含相似术语信息的列表，每个术语包含：
-            - concept_id: 概念ID
             - concept_name: 概念名称
             - domain_id: 领域ID
-            - vocabulary_id: 词汇表ID
-            - concept_class_id: 概念类别ID
-            - standard_concept: 是否标准概念
-            - concept_code: 概念代码
-            - synonyms: 同义词
             - distance: 相似度距离
         """
         # 获取查询的向量表示
@@ -86,9 +66,7 @@ class StdService:
             "data": [query_embedding],
             "limit": limit,
             "output_fields": [
-                "concept_id", "concept_name", "domain_id", 
-                "vocabulary_id", "concept_class_id", "standard_concept",
-                "concept_code", "synonyms"
+                "concept_id", "concept_name", "domain_id"
             ],
             # "filter": "domain_id == 'Condition'"
         }
@@ -99,17 +77,10 @@ class StdService:
         results = []
         for hit in search_result[0]:
             results.append({
-                "concept_id": hit['entity'].get('concept_id'),
                 "concept_name": hit['entity'].get('concept_name'),
                 "domain_id": hit['entity'].get('domain_id'),
-                "vocabulary_id": hit['entity'].get('vocabulary_id'),
-                "concept_class_id": hit['entity'].get('concept_class_id'),
-                "standard_concept": hit['entity'].get('standard_concept'),
-                "concept_code": hit['entity'].get('concept_code'),
-                "synonyms": hit['entity'].get('synonyms'),
                 "distance": float(hit['distance'])
             })
-
         return results
 
     def __del__(self):

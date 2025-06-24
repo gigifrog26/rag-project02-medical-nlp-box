@@ -25,24 +25,18 @@ embedding_function = model.dense.SentenceTransformerEmbeddingFunction(
 # embedding_function = model.dense.OpenAIEmbeddingFunction(model_name='text-embedding-3-large')
 
 # 文件路径
-file_path = "backend/data/SNOMED_5000.csv"
+file_path = "backend/data/finance.csv"
 # db_path = "backend/db/snomed_bge_m3.db"
 milvus_host = "127.0.0.1"
 milvus_port = 19530
+collection_name = "fin_term"
 
 # 连接到 Milvus
 client = MilvusClient(uri=f"http://{milvus_host}:{milvus_port}")
-# connections.connect(host=milvus_host, port=milvus_port)
-
-collection_name = "concepts_only_name"
-# collection_name = "concepts_with_synonym"
 
 # 加载数据
 logging.info("Loading data from CSV")
-df = pd.read_csv(file_path, 
-                 dtype=str, 
-                low_memory=False,
-                 ).fillna("NA")
+df = pd.read_csv(file_path, dtype=str, low_memory=False).fillna("NA")
 
 # 获取向量维度（使用一个样本文档）
 sample_doc = "Sample Text"
@@ -53,23 +47,10 @@ vector_dim = len(sample_embedding)
 fields = [
     FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
     FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=vector_dim), # BGE-m3 最重要
-    FieldSchema(name="concept_id", dtype=DataType.VARCHAR, max_length=50),
     FieldSchema(name="concept_name", dtype=DataType.VARCHAR, max_length=300),
-    FieldSchema(name="domain_id", dtype=DataType.VARCHAR, max_length=20),
-    FieldSchema(name="vocabulary_id", dtype=DataType.VARCHAR, max_length=20),
-    FieldSchema(name="concept_class_id", dtype=DataType.VARCHAR, max_length=20),
-    FieldSchema(name="standard_concept", dtype=DataType.VARCHAR, max_length=10),
-    FieldSchema(name="concept_code", dtype=DataType.VARCHAR, max_length=50),
-    FieldSchema(name="valid_start_date", dtype=DataType.VARCHAR, max_length=10),
-    FieldSchema(name="valid_end_date", dtype=DataType.VARCHAR, max_length=10),
-    # FieldSchema(name="full_name", dtype=DataType.VARCHAR, max_length=500), # FSN
-    # FieldSchema(name="synonyms", dtype=DataType.VARCHAR, max_length=1000), # 同义词
-    # FieldSchema(name="definitions", dtype=DataType.VARCHAR, max_length=1000), # 定义
-    FieldSchema(name="input_file", dtype=DataType.VARCHAR, max_length=500),
+    FieldSchema(name="domain_id", dtype=DataType.VARCHAR, max_length=100),
 ]
-schema = CollectionSchema(fields, 
-                          "SNOMED-CT Concepts", 
-                          enable_dynamic_field=True)
+schema = CollectionSchema(fields, "Finance Concepts", enable_dynamic_field=True)
 
 # 如果集合不存在，创建集合
 if not client.has_collection(collection_name):
@@ -101,21 +82,9 @@ for start_idx in tqdm(range(0, len(df), batch_size), desc="Processing batches"):
     batch_df = df.iloc[start_idx:end_idx]
 
     # 准备文档
-    # docs = [f"Term: {row['concept_name']}; Synonyms: {row['Synonyms']}" for _, row in batch_df.iterrows()]
     docs = []
     for _, row in batch_df.iterrows():
-        doc_parts = [row['concept_name']]
-
-        # if row['Full Name'] != "NA" and row['Full Name'] != row['concept_name']:
-        #     doc_parts.append(",Full Name: " + row['Full Name'])
-
-        # if row['Synonyms'] != "NA" and row['Synonyms'] != row['concept_name']:
-        #     doc_parts.append(", Synonyms: " + row['Synonyms'])
-
-        # if row['Definitions'] != "NA" and row['Definitions'] not in [row['concept_name'], row.get('Full Name', '')]:
-        #     doc_parts.append(", Definitions: " + row['Definitions'])
-
-        docs.append(" ".join(doc_parts))
+        docs.append(row['concept_name'])
 
     # 生成嵌入
     try:
@@ -130,24 +99,11 @@ for start_idx in tqdm(range(0, len(df), batch_size), desc="Processing batches"):
         {
             # "id": idx + start_idx,
             "vector": embeddings[idx],
-            "concept_id": str(row['concept_id']),
             "concept_name": str(row['concept_name']),
-            "domain_id": str(row['domain_id']),
-            "vocabulary_id": str(row['vocabulary_id']),
-            "concept_class_id": str(row['concept_class_id']),
-            "standard_concept": str(row['standard_concept']),
-            "concept_code": str(row['concept_code']),
-            "valid_start_date": str(row['valid_start_date']),
-            "valid_end_date": str(row['valid_end_date']),
-            # "invalid_reason": str(row['invalid_reason']),
-            # "full_name": str(row['Full Name']),
-            # "synonyms": str(row['Synonyms']),
-            # "definitions": str(row['Definitions']),
-            "input_file": file_path
+            "domain_id": str(row['domain_id'])
         } for idx, (_, row) in enumerate(batch_df.iterrows())
     ]
 
-    # 插入数据 - 1024个向量条目，即1024个医疗术语（标准概念）
     try:
         res = client.insert(
             collection_name=collection_name,
@@ -159,32 +115,19 @@ for start_idx in tqdm(range(0, len(df), batch_size), desc="Processing batches"):
 
 logging.info("Insert process completed.")
 
-# 示例查询
-# query = "somatic hallucination"
-query = "SOB"
-query_embeddings = embedding_function([query])
 
+# 示例查询
+query = "A Priori Probability"
+query_embeddings = embedding_function([query])
+client.load_collection(
+    collection_name=collection_name
+)
 
 # 搜索余弦相似度最高的
 search_result = client.search(
     collection_name=collection_name,
     data=[query_embeddings[0].tolist()],
     limit=5,
-    output_fields=["concept_name", 
-                #    "synonyms", 
-                   "concept_class_id", 
-                   ]
-)
-logging.info(f"Search result for 'Somatic hallucination': {search_result}")
+    output_fields=["concept_name", "domain_id"])
+logging.info(f"Search result for '{query}': {search_result}")
 
-# 查询所有匹配的实体
-query_result = client.query(
-    collection_name=collection_name,
-    filter="concept_name == 'Dyspnea'",
-    output_fields=["concept_name", 
-                #    "synonyms", 
-                   "concept_class_id", 
-                   ],
-    limit=5
-)
-logging.info(f"Query result for concept_name == 'Dyspnea': {query_result}")

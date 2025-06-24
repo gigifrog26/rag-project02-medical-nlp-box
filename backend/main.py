@@ -1,11 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
-from services.ner_service import NERService
+from services.ner_service import FinanceNERService
 from services.std_service import StdService
-from services.abbr_service import AbbrService
-from services.corr_service import CorrService
-from services.gen_service import GenService
 from typing import List, Dict, Optional, Literal, Union, Any
 import logging
 
@@ -26,11 +23,8 @@ app.add_middleware(
 )
 
 # 初始化各个服务
-ner_service = NERService()  # 命名实体识别服务
+ner_service = FinanceNERService()  # 命名实体识别服务
 standardization_service = StdService()  # 术语标准化服务
-abbr_service = AbbrService()  # 缩写扩展服务
-gen_service = GenService()  # 文本生成服务
-corr_service = CorrService()  # 拼写纠正服务
 
 # 基础模型类
 class BaseInputModel(BaseModel):
@@ -167,38 +161,27 @@ async def standardization(input: TextInput):
         # 记录请求信息
         logger.info(f"Received request: text={input.text}, options={input.options}, embeddingOptions={input.embeddingOptions}")
 
-        # 配置术语类型
-        all_medical_terms = input.options.pop('allMedicalTerms', False)
-        term_types = {'allMedicalTerms': all_medical_terms}
-
         # 进行命名实体识别
-        ner_results = ner_service.process(input.text, input.options, term_types)
+        ner_results = ner_service.process(input.text)
 
         # 初始化标准化服务
         standardization_service = StdService(
             provider=input.embeddingOptions.provider,
             model=input.embeddingOptions.model,
-            db_path=f"db/{input.embeddingOptions.dbName}.db",
             collection_name=input.embeddingOptions.collectionName
         )
 
-        # 获取识别到的实体
-        entities = ner_results.get('entities', [])
-        if not entities:
-            return {"message": "No medical terms have been recognized", "standardized_terms": []}
-
         # 标准化每个实体
         standardized_results = []
-        for entity in entities:
-            std_result = standardization_service.search_similar_terms(entity['word'])
+        for entity in ner_results:
+            std_result = standardization_service.search_similar_terms(entity)
             standardized_results.append({
-                "original_term": entity['word'],
-                "entity_group": entity['entity_group'],
+                "original_term": entity,
                 "standardized_results": std_result
             })
 
         return {
-            "message": f"{len(entities)} medical terms have been recognized and standardized",
+            "message": f"{len(ner_results)} finance terms have been recognized and standardized",
             "standardized_terms": standardized_results
         }
 
@@ -210,81 +193,24 @@ async def standardization(input: TextInput):
 @app.post("/api/ner")
 async def ner(input: TextInput):
     try:
-        logger.info(f"Received NER request: text={input.text}, options={input.options}, termTypes={input.termTypes}")
-        results = ner_service.process(input.text, input.options, input.termTypes)
-        return results
+        logger.info(f"Received NER request: text={input.text}")
+        results = ner_service.process(input.text)
+        found_ent = []
+        for res in results:
+            pos = input.text.find(res)
+            found_ent.append({
+                "start": pos,
+                "entity_group": "SUBJECT",
+                "word": res,
+                "end": pos + len(res)
+            })
+
+        return {
+                "text": input.text,
+                "entities": found_ent
+            }
     except Exception as e:
         logger.error(f"Error in NER processing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# API 端点：拼写纠正
-@app.post("/api/corr")
-async def correct_notes(input: CorrInput):
-    try:
-        if input.method == "correct_spelling":  # 拼写纠正
-            return corr_service.correct_spelling(input.text, input.llmOptions)
-        elif input.method == "add_mistakes":  # 添加错误（测试用）
-            return corr_service.add_mistakes(input.text, input.errorOptions)
-        else:
-            raise HTTPException(status_code=400, detail="Invalid method")
-    except Exception as e:
-        logger.error(f"Error in correction processing: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# API 端点：缩写扩展
-@app.post("/api/abbr")
-async def expand_abbreviations(input: AbbrInput):
-    try:
-        if input.method == "simple_ollama":  # 简单扩展
-            output = abbr_service.simple_ollama_expansion(input.text, input.llmOptions)
-            return {"input": input.text, "output": output}
-        elif input.method == "query_db_llm_rerank":  # 数据库查询+重排序
-            return abbr_service.query_db_llm_rerank(
-                input.text, 
-                input.context, 
-                input.llmOptions,
-                input.embeddingOptions
-            )
-        elif input.method == "llm_rank_query_db":  # LLM扩展+数据库标准化
-            return abbr_service.llm_rank_query_db(
-                input.text, 
-                input.context, 
-                input.llmOptions,
-                input.embeddingOptions
-            )
-        else:
-            raise HTTPException(status_code=400, detail="Invalid method")
-    except Exception as e:
-        logger.error(f"Error in abbreviation expansion: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-# API 端点：医疗文本生成
-@app.post("/api/gen")
-async def generate_medical_content(input: GenInput):
-    try:
-        if input.method == "generate_medical_note":  # 生成病历
-            return gen_service.generate_medical_note(
-                input.patient_info,
-                input.symptoms,
-                input.diagnosis,
-                input.treatment,
-                input.llmOptions
-            )
-        elif input.method == "generate_differential_diagnosis":  # 生成鉴别诊断
-            return gen_service.generate_differential_diagnosis(
-                input.symptoms,
-                input.llmOptions
-            )
-        elif input.method == "generate_treatment_plan":  # 生成治疗计划
-            return gen_service.generate_treatment_plan(
-                input.diagnosis,
-                input.patient_info,
-                input.llmOptions
-            )
-        else:
-            raise HTTPException(status_code=400, detail="Invalid method")
-    except Exception as e:
-        logger.error(f"Error in medical content generation: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # 启动服务器

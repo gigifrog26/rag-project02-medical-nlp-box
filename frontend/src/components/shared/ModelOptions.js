@@ -51,8 +51,8 @@ export const EmbeddingOptions = ({ options, onChange }) => {
           onChange={onChange}
           className="mt-1 block w-full rounded-md border-gray-300 shadow-sm"
         >
-          <option value="openai">OpenAI</option>
-          <option value="bedrock">Bedrock</option>
+          {/* <option value="openai">OpenAI</option>
+          <option value="bedrock">Bedrock</option> */}
           <option value="huggingface">HuggingFace</option>
         </select>
       </div>
