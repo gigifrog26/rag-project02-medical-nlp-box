@@ -1,4 +1,4 @@
-# 医疗网站项目
+# 金融网站项目 
 
 一个使用 Next.js 和 Tailwind CSS 构建的现代化、金融术语标准化的服务平台。 
 <a href="https://u.geekbang.org/subject/airag/1009927"> 极客时间RAG进阶训练营</a>
